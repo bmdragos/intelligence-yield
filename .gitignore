@@ -1,0 +1,6 @@
+.venv/
+*.png
+*.py
+__pycache__/
+.DS_Store
+hn_post.md

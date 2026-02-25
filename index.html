@@ -1,0 +1,884 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Intelligence Yield — METR Time Horizons v1.1</title>
+<meta name="description" content="How much useful work does each minute of compute produce? An efficiency analysis of frontier AI models using METR eval data.">
+<meta property="og:title" content="Intelligence Yield by Model">
+<meta property="og:description" content="Opus 4.6 produces 14x more useful work per compute-minute than Codex 5.3. An efficiency analysis of frontier AI models.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0a0e14;
+    --surface: #0f1419;
+    --surface-raised: #151b23;
+    --border: #1e2731;
+    --text: #d4dae3;
+    --text-dim: #7a8594;
+    --text-muted: #4a5568;
+    --anthropic: #4aeaac;
+    --openai: #8b949e;
+    --google: #60a5fa;
+    --accent: #f0883e;
+    --ref-line: rgba(240, 136, 62, 0.6);
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'IBM Plex Sans', sans-serif;
+    line-height: 1.6;
+    min-height: 100vh;
+  }
+
+  .container {
+    max-width: 1020px;
+    margin: 0 auto;
+    padding: 3rem 2rem 4rem;
+  }
+
+  header { margin-bottom: 2.5rem; }
+
+  h1 {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 1.8rem;
+    font-weight: 600;
+    color: #fff;
+    letter-spacing: -0.02em;
+    margin-bottom: 0.4rem;
+  }
+
+  .subtitle {
+    font-size: 1.05rem;
+    color: var(--text-dim);
+    font-weight: 300;
+    margin-bottom: 1.25rem;
+  }
+
+  .formula-box {
+    display: inline-block;
+    background: var(--surface-raised);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 0.55rem 1rem;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.85rem;
+    color: var(--text-dim);
+  }
+  .formula-box span { color: #fff; font-weight: 600; }
+
+  .y-axis-label {
+    position: absolute;
+    left: -8px;
+    top: 50%;
+    transform: rotate(-90deg) translateX(-50%);
+    transform-origin: left center;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.7rem;
+    color: var(--text-muted);
+    white-space: nowrap;
+    letter-spacing: 0.03em;
+  }
+
+  .chart-container {
+    position: relative;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 2rem 1.5rem 1.5rem;
+    margin-bottom: 2.5rem;
+  }
+
+  .chart-area {
+    position: relative;
+    height: 380px;
+    margin-left: 48px;
+  }
+
+  .gridlines {
+    position: absolute; inset: 0;
+    pointer-events: none;
+  }
+  .gridline {
+    position: absolute; left: 0; right: 0;
+    height: 1px;
+    background: var(--border);
+  }
+  .gridline.ref { background: var(--ref-line); }
+
+  .ref-label {
+    position: absolute;
+    right: 0;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.65rem;
+    color: var(--accent);
+    transform: translateY(-140%);
+    background: var(--surface);
+    padding: 0 6px;
+  }
+
+  .y-axis {
+    position: absolute;
+    left: 0; top: 0; bottom: 0;
+    width: 48px;
+  }
+  .y-tick {
+    position: absolute;
+    right: 8px;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.7rem;
+    color: var(--text-muted);
+    transform: translateY(50%);
+  }
+
+  .bars-wrap {
+    position: absolute; inset: 0;
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+    gap: 4px;
+    padding: 0 1rem;
+    z-index: 2;
+  }
+
+  /* Provider group dividers */
+  .bar-divider {
+    width: 1px;
+    background: var(--border);
+    align-self: stretch;
+    margin: 0 4px;
+    opacity: 0.5;
+  }
+
+  .bar-col {
+    flex: 1;
+    max-width: 80px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    position: relative;
+    height: 100%;
+    justify-content: flex-end;
+    cursor: pointer;
+  }
+
+  .bar-val {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.72rem;
+    font-weight: 600;
+    margin-bottom: 3px;
+    opacity: 0;
+    transform: translateY(6px);
+    transition: all 0.25s ease;
+    white-space: nowrap;
+  }
+  .bar-col:hover .bar-val {
+    opacity: 1;
+    transform: translateY(0);
+  }
+
+  .bar {
+    width: 65%;
+    border-radius: 3px 3px 0 0;
+    transition: filter 0.2s, transform 0.2s;
+    transform-origin: bottom;
+    animation: grow 0.7s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+    transform: scaleY(0);
+  }
+  .bar:hover { filter: brightness(1.25); }
+
+  .bar.anthropic { background: var(--anthropic); box-shadow: 0 0 18px rgba(74,234,172,0.12); }
+  .bar.openai    { background: var(--openai); }
+  .bar.google    { background: var(--google); box-shadow: 0 0 14px rgba(96,165,250,0.1); }
+
+  @keyframes grow { to { transform: scaleY(1); } }
+
+  .bar-name {
+    position: absolute;
+    bottom: -2.2rem;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.68rem;
+    color: var(--text-dim);
+    white-space: nowrap;
+    text-align: center;
+  }
+
+  .chart-footer {
+    display: flex;
+    gap: 1.5rem;
+    justify-content: center;
+    margin-top: 2.5rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--border);
+  }
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-size: 0.8rem;
+    color: var(--text-dim);
+  }
+  .legend-dot {
+    width: 10px; height: 10px;
+    border-radius: 2px;
+  }
+
+  .toggle-row {
+    display: flex;
+    gap: 0.5rem;
+    margin-bottom: 1.5rem;
+    align-items: center;
+  }
+  .toggle-row span {
+    font-size: 0.8rem;
+    color: var(--text-dim);
+    margin-right: 0.25rem;
+  }
+  .tog {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.75rem;
+    padding: 0.35rem 0.75rem;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: transparent;
+    color: var(--text-dim);
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .tog.active {
+    background: var(--surface-raised);
+    color: #fff;
+    border-color: var(--text-muted);
+  }
+
+  .data-section h2 {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 1rem;
+    font-weight: 500;
+    color: #fff;
+    margin-bottom: 0.75rem;
+  }
+
+  .table-wrap {
+    overflow-x: auto;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--surface);
+  }
+
+  table { width: 100%; border-collapse: collapse; font-size: 0.84rem; }
+  thead { background: var(--surface-raised); }
+
+  th {
+    font-family: 'IBM Plex Mono', monospace;
+    font-weight: 500;
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-dim);
+    padding: 0.7rem 0.8rem;
+    text-align: right;
+    border-bottom: 1px solid var(--border);
+    cursor: pointer;
+    user-select: none;
+    white-space: nowrap;
+    transition: color 0.15s;
+  }
+  th:first-child { text-align: left; }
+  th:hover { color: #fff; }
+  th.sorted { color: var(--accent); }
+  th .arrow { font-size: 0.55rem; margin-left: 3px; }
+
+  td {
+    padding: 0.6rem 0.8rem;
+    text-align: right;
+    border-bottom: 1px solid var(--border);
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.8rem;
+    transition: background 0.15s;
+  }
+  td:first-child {
+    text-align: left;
+    font-family: 'IBM Plex Sans', sans-serif;
+    font-weight: 500;
+  }
+  tr:hover td { background: var(--surface-raised); }
+  tr:last-child td { border-bottom: none; }
+
+  .dot {
+    display: inline-block;
+    width: 8px; height: 8px;
+    border-radius: 2px;
+    margin-right: 6px;
+    vertical-align: middle;
+  }
+
+  .iy-hi  { color: var(--anthropic); font-weight: 600; }
+  .iy-mid { color: var(--text); font-weight: 500; }
+  .iy-lo  { color: var(--text-muted); }
+
+  #tip {
+    position: fixed;
+    background: var(--surface-raised);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 0.65rem 0.85rem;
+    font-size: 0.78rem;
+    pointer-events: none;
+    z-index: 100;
+    opacity: 0;
+    transition: opacity 0.12s;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.45);
+    max-width: 260px;
+  }
+  #tip.show { opacity: 1; }
+  .tip-name { font-weight: 600; color: #fff; margin-bottom: 0.25rem; }
+  .tip-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 1rem;
+    color: var(--text-dim);
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.72rem;
+    line-height: 1.6;
+  }
+  .tip-row b { color: var(--text); font-weight: 500; }
+
+  .source {
+    margin-top: 2.5rem;
+    padding-top: 1.25rem;
+    border-top: 1px solid var(--border);
+    font-size: 0.78rem;
+    color: var(--text-muted);
+  }
+  .source a {
+    color: var(--text-dim);
+    text-decoration: none;
+    border-bottom: 1px solid var(--border);
+    transition: all 0.2s;
+  }
+  .source a:hover { color: #fff; border-color: var(--text-dim); }
+
+  @media (max-width: 640px) {
+    .container { padding: 1.5rem 1rem; }
+    h1 { font-size: 1.3rem; }
+    .chart-area { height: 300px; }
+    .bar-col { max-width: 55px; }
+    .bar-name { font-size: 0.55rem; }
+    .chart-footer { flex-wrap: wrap; gap: 0.6rem; }
+  }
+</style>
+</head>
+<body>
+
+<div class="container">
+  <header>
+    <h1>Intelligence Yield</h1>
+    <p class="subtitle">How much useful work does each minute of compute produce?</p>
+    <div class="formula-box"><span>IY</span> = (p50 time horizon &times; avg score) / working time</div>
+    <p style="font-size:0.78rem;color:var(--text-muted);margin-top:0.5rem;">Source: <a href="https://metr.org/time-horizons/" target="_blank" rel="noopener" style="color:var(--text-dim);border-bottom:1px solid var(--border);">METR Time Horizons v1.1</a></p>
+  </header>
+
+  <p style="font-size:0.92rem;color:var(--text-dim);max-width:680px;line-height:1.7;margin-bottom:2.5rem;">Everyone focuses on the METR Time Horizons headline number. But combining task difficulty, success rate, and compute cost reveals a massive efficiency gap. Opus 4.6 solves harder tasks, more reliably, with considerably less compute.</p>
+
+  <div class="chart-container">
+    <div style="margin-bottom:0.5rem;">
+      <h2 style="font-family:'IBM Plex Mono',monospace;font-size:1rem;font-weight:500;color:#fff;margin-bottom:0.25rem;">Intelligence Yield by Model</h2>
+      <p style="font-size:0.82rem;color:var(--text-dim);">Frontier models — higher is better</p>
+    </div>
+    <div style="position:relative;">
+      <div class="y-axis-label">Intelligence Yield (IY)</div>
+      <div class="y-axis" id="yAxis"></div>
+      <div class="chart-area" id="chartArea">
+        <div class="gridlines" id="grid"></div>
+        <div class="bars-wrap" id="bars"></div>
+      </div>
+    </div>
+    <div class="chart-footer">
+      <div class="legend-item"><div class="legend-dot" style="background:var(--anthropic)"></div>Anthropic</div>
+      <div class="legend-item"><div class="legend-dot" style="background:var(--openai)"></div>OpenAI</div>
+      <div class="legend-item"><div class="legend-dot" style="background:var(--google)"></div>Google</div>
+    </div>
+  </div>
+
+  <div class="chart-container" id="timeChart">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:0.5rem;">
+      <div>
+        <h2 style="font-family:'IBM Plex Mono',monospace;font-size:1rem;font-weight:500;color:#fff;margin-bottom:0.25rem;">Intelligence Yield Over Time</h2>
+        <p style="font-size:0.82rem;color:var(--text-dim);">Release date vs. IY — each dot is a model</p>
+      </div>
+      <div class="toggle-row" style="margin:0;">
+        <span>Scale:</span>
+        <button class="tog active" data-scale="log" onclick="setTimeScale('log')">Log</button>
+        <button class="tog" data-scale="linear" onclick="setTimeScale('linear')">Linear</button>
+      </div>
+    </div>
+    <div style="position:relative;">
+      <div class="y-axis-label">Intelligence Yield (IY)</div>
+      <div class="y-axis" id="timeYAxis"></div>
+      <div style="position:relative;height:340px;margin-left:48px;">
+        <div class="gridlines" id="timeGrid"></div>
+        <canvas id="timeCanvas" style="position:absolute;inset:0;z-index:2;"></canvas>
+        <div id="timePoints" style="position:absolute;inset:0;z-index:3;pointer-events:none;"></div>
+      </div>
+      <div id="timeXAxis" style="margin-left:48px;display:flex;justify-content:space-between;padding-top:6px;"></div>
+    </div>
+    <div class="chart-footer">
+      <div class="legend-item"><div class="legend-dot" style="background:var(--anthropic)"></div>Anthropic</div>
+      <div class="legend-item"><div class="legend-dot" style="background:var(--openai)"></div>OpenAI</div>
+      <div class="legend-item"><div class="legend-dot" style="background:var(--google)"></div>Google</div>
+    </div>
+  </div>
+
+  <div class="data-section">
+    <h2>Raw Data</h2>
+    <div class="table-wrap">
+      <table>
+        <thead id="thead"></thead>
+        <tbody id="tbody"></tbody>
+      </table>
+    </div>
+  </div>
+
+</div>
+
+<div id="tip">
+  <div class="tip-name" id="tipName"></div>
+  <div id="tipBody"></div>
+</div>
+
+<script>
+const ALL = [
+  { name:"Claude 3 Opus",           provider:"Anthropic", date:"2024-03-04", p50:3.575,   score:0.2948, workSec:16045.2,  frontier:false },
+  { name:"Claude 3.5 Sonnet (Old)", provider:"Anthropic", date:"2024-06-20", p50:10.772,  score:0.4015, workSec:20649.8,  frontier:false },
+  { name:"Claude 3.5 Sonnet (New)", provider:"Anthropic", date:"2024-10-22", p50:19.776,  score:0.4524, workSec:18941.2,  frontier:false },
+  { name:"Claude 3.7 Sonnet",       provider:"Anthropic", date:"2025-02-24", p50:59.764,  score:0.5582, workSec:16779.6,  frontier:false },
+  { name:"Opus 4",                  provider:"Anthropic", date:"2025-05-22", p50:101.183, score:0.6155, workSec:14761.6,  frontier:true },
+  { name:"Opus 4.1",                provider:"Anthropic", date:"2025-08-05", p50:100.844, score:0.6157, workSec:39776.4,  frontier:false },
+  { name:"Opus 4.5",                provider:"Anthropic", date:"2025-11-24", p50:320.422, score:0.7301, workSec:19769.6,  frontier:true },
+  { name:"Opus 4.6",                provider:"Anthropic", date:"2026-02-05", p50:870.027, score:0.7886, workSec:13714.4,  frontier:true },
+
+  { name:"GPT-4",                   provider:"OpenAI",    date:"2023-03-14", p50:3.525,   score:0.2930, workSec:2526.1,   frontier:false },
+  { name:"GPT-4 1106",              provider:"OpenAI",    date:"2023-11-06", p50:3.610,   score:0.2891, workSec:32900.4,  frontier:false },
+  { name:"GPT-4 Turbo",             provider:"OpenAI",    date:"2024-04-09", p50:3.225,   score:0.2718, workSec:31032.7,  frontier:false },
+  { name:"GPT-4o",                  provider:"OpenAI",    date:"2024-05-13", p50:6.404,   score:0.3384, workSec:33212.5,  frontier:false },
+  { name:"o1-preview",              provider:"OpenAI",    date:"2024-09-12", p50:19.395,  score:0.4514, workSec:5355.6,   frontier:false },
+  { name:"o1",                      provider:"OpenAI",    date:"2024-12-05", p50:37.938,  score:0.5105, workSec:277917.3, frontier:false },
+  { name:"o3",                      provider:"OpenAI",    date:"2025-04-16", p50:120.730, score:0.6362, workSec:326482.3, frontier:true },
+  { name:"GPT-5",                   provider:"OpenAI",    date:"2025-08-07", p50:213.954, score:0.6937, workSec:312206.5, frontier:true },
+  { name:"Codex 5.1-Max",           provider:"OpenAI",    date:"2025-11-19", p50:236.549, score:0.7083, workSec:197780.8, frontier:false },
+  { name:"GPT-5.2",                 provider:"OpenAI",    date:"2025-12-11", p50:394.384, score:0.7529, workSec:512631.4, frontier:true },
+  { name:"Codex 5.3",               provider:"OpenAI",    date:"2026-02-05", p50:389.977, score:0.7454, workSec:79129.6,  frontier:true },
+
+  { name:"Gemini 3 Pro",            provider:"Google",    date:"2025-11-18", p50:236.655, score:0.7098, workSec:52126.1,  frontier:true },
+];
+
+ALL.forEach(d => {
+  d.workMin = d.workSec / 60;
+  d.iy = d.workMin > 0 ? (d.p50 * d.score) / d.workMin : 0;
+});
+
+const provColor = p => ({ Anthropic:'var(--anthropic)', OpenAI:'var(--openai)', Google:'var(--google)' }[p]);
+const provClass = p => p.toLowerCase();
+const iyClass = v => v >= 0.5 ? 'iy-hi' : v >= 0.05 ? 'iy-mid' : 'iy-lo';
+const fmt = (v, d=2) => v < 0.01 ? v.toFixed(4) : v < 0.1 ? v.toFixed(3) : v.toFixed(d);
+const fmtK = v => v >= 1000 ? (v/1000).toFixed(1)+'k' : v.toFixed(0);
+
+function getData() { return ALL.filter(d => d.frontier); }
+
+let sortCol = 'iy';
+let sortDir = -1;
+
+function chartOrder(data) {
+  const pOrd = { Anthropic:0, OpenAI:1, Google:2 };
+  return [...data].sort((a, b) => {
+    if (pOrd[a.provider] !== pOrd[b.provider]) return pOrd[a.provider] - pOrd[b.provider];
+    return new Date(a.date) - new Date(b.date);
+  });
+}
+
+function niceStep(max, targetTicks) {
+  const raw = max / targetTicks;
+  const mag = Math.pow(10, Math.floor(Math.log10(raw)));
+  const residual = raw / mag;
+  let nice;
+  if (residual <= 1.5) nice = 1;
+  else if (residual <= 3) nice = 2;
+  else if (residual <= 7) nice = 5;
+  else nice = 10;
+  return nice * mag;
+}
+
+function renderChart() {
+  const data = chartOrder(getData());
+  const maxIY = Math.max(...data.map(d => d.iy)) * 1.15;
+  const step = niceStep(maxIY, 7);
+
+  const grid = document.getElementById('grid');
+  const yAxis = document.getElementById('yAxis');
+  const barsEl = document.getElementById('bars');
+  grid.innerHTML = ''; yAxis.innerHTML = ''; barsEl.innerHTML = '';
+
+  for (let v = 0; v <= maxIY + step * 0.01; v += step) {
+    const pct = (v / maxIY) * 100;
+    const gl = document.createElement('div');
+    gl.className = 'gridline';
+    gl.style.bottom = pct + '%';
+    grid.appendChild(gl);
+
+    const tk = document.createElement('div');
+    tk.className = 'y-tick';
+    tk.style.bottom = pct + '%';
+    tk.textContent = v < 0.1 ? v.toFixed(2) : v.toFixed(1);
+    yAxis.appendChild(tk);
+  }
+
+  if (1.0 <= maxIY) {
+    const pct = (1.0 / maxIY) * 100;
+    const rl = document.createElement('div');
+    rl.className = 'gridline ref';
+    rl.style.bottom = pct + '%';
+    grid.appendChild(rl);
+    const lab = document.createElement('div');
+    lab.className = 'ref-label';
+    lab.style.bottom = pct + '%';
+    lab.textContent = 'IY = 1.0  (1 min human work per min compute)';
+    grid.appendChild(lab);
+  }
+
+  let lastProv = null;
+  data.forEach((d, i) => {
+    if (lastProv && d.provider !== lastProv) {
+      const div = document.createElement('div');
+      div.className = 'bar-divider';
+      barsEl.appendChild(div);
+    }
+    lastProv = d.provider;
+
+    const col = document.createElement('div');
+    col.className = 'bar-col';
+
+    const val = document.createElement('div');
+    val.className = 'bar-val';
+    val.style.color = provColor(d.provider);
+    val.textContent = fmt(d.iy);
+
+    const bar = document.createElement('div');
+    bar.className = 'bar ' + provClass(d.provider);
+    bar.style.height = Math.max((d.iy / maxIY) * 100, 0.5) + '%';
+    bar.style.animationDelay = (i * 0.055) + 's';
+
+    const nm = document.createElement('div');
+    nm.className = 'bar-name';
+    nm.textContent = d.name;
+
+    col.appendChild(val);
+    col.appendChild(bar);
+    col.appendChild(nm);
+    barsEl.appendChild(col);
+
+    col.addEventListener('mouseenter', e => showTip(e, d));
+    col.addEventListener('mousemove', moveTip);
+    col.addEventListener('mouseleave', hideTip);
+  });
+}
+
+const tip = document.getElementById('tip');
+function fmtTime(min) {
+  if (min < 60) return Math.round(min) + ' min';
+  const h = Math.floor(min / 60);
+  const m = Math.round(min % 60);
+  return m > 0 ? `${h}h ${m}m` : `${h}h`;
+}
+function fmtHorizon(min) {
+  if (min < 60) return Math.round(min) + ' min';
+  return (min / 60).toFixed(1) + ' hrs';
+}
+function showTip(e, d) {
+  document.getElementById('tipName').textContent = d.name;
+  document.getElementById('tipBody').innerHTML =
+    `<div class="tip-row"><span>Provider</span><b>${d.provider}</b></div>` +
+    `<div class="tip-row"><span>Intelligence Yield</span><b>${fmt(d.iy)}</b></div>` +
+    `<div class="tip-row"><span>p50 horizon</span><b>${fmtHorizon(d.p50)}</b></div>` +
+    `<div class="tip-row"><span>Avg score</span><b>${(d.score * 100).toFixed(1)}%</b></div>` +
+    `<div class="tip-row"><span>Working time</span><b>${fmtTime(d.workMin)}</b></div>` +
+    `<div class="tip-row"><span>Released</span><b>${d.date}</b></div>`;
+  tip.classList.add('show');
+  moveTip(e);
+}
+function moveTip(e) {
+  let x = e.clientX + 14, y = e.clientY + 14;
+  const r = tip.getBoundingClientRect();
+  if (x + r.width > window.innerWidth) x = e.clientX - r.width - 14;
+  if (y + r.height > window.innerHeight) y = e.clientY - r.height - 14;
+  tip.style.left = x + 'px'; tip.style.top = y + 'px';
+}
+function hideTip() { tip.classList.remove('show'); }
+
+const COLS = [
+  { key:'name',     label:'Model',              align:'left' },
+  { key:'provider', label:'Provider',            align:'right' },
+  { key:'date',     label:'Released',            align:'right' },
+  { key:'p50',      label:'p50 Horizon',         align:'right' },
+  { key:'score',    label:'Avg Score',           align:'right' },
+  { key:'workMin',  label:'Working Time',        align:'right' },
+  { key:'iy',       label:'IY',                  align:'right' },
+];
+
+function cellFmt(key, val) {
+  if (key === 'p50') return val.toFixed(1);
+  if (key === 'score') return val.toFixed(4);
+  if (key === 'workMin') return fmtK(val);
+  if (key === 'iy') return fmt(val);
+  return val;
+}
+
+function renderThead() {
+  const thead = document.getElementById('thead');
+  const tr = document.createElement('tr');
+  COLS.forEach(c => {
+    const th = document.createElement('th');
+    th.dataset.key = c.key;
+    th.style.textAlign = c.align;
+    th.innerHTML = c.label + ' <span class="arrow"></span>';
+    if (c.key === sortCol) {
+      th.classList.add('sorted');
+      th.querySelector('.arrow').textContent = sortDir === 1 ? '▲' : '▼';
+    }
+    th.addEventListener('click', () => {
+      if (sortCol === c.key) sortDir *= -1;
+      else { sortCol = c.key; sortDir = (c.key === 'name' || c.key === 'provider' || c.key === 'date') ? 1 : -1; }
+      renderThead(); renderTbody();
+    });
+    tr.appendChild(th);
+  });
+  thead.innerHTML = '';
+  thead.appendChild(tr);
+}
+
+function renderTbody() {
+  const data = [...getData()].sort((a, b) => {
+    let va = a[sortCol], vb = b[sortCol];
+    if (typeof va === 'string') return sortDir * va.localeCompare(vb);
+    return sortDir * (va - vb);
+  });
+
+  const tbody = document.getElementById('tbody');
+  tbody.innerHTML = data.map(d => {
+    const dot = `<span class="dot" style="background:${provColor(d.provider)}"></span>`;
+    return `<tr>
+      <td style="text-align:left">${dot}${d.name}</td>
+      <td style="font-family:'IBM Plex Sans',sans-serif;color:var(--text-dim)">${d.provider}</td>
+      <td>${d.date}</td>
+      <td>${fmtHorizon(d.p50)}</td>
+      <td>${(d.score * 100).toFixed(1)}%</td>
+      <td>${fmtTime(d.workMin)}</td>
+      <td class="${iyClass(d.iy)}">${fmt(d.iy)}</td>
+    </tr>`;
+  }).join('');
+}
+
+
+
+renderChart();
+renderThead();
+renderTbody();
+
+let timeScale = 'log';
+
+function setTimeScale(s) {
+  timeScale = s;
+  document.querySelectorAll('#timeChart .tog').forEach(b => {
+    b.classList.toggle('active', b.dataset.scale === s);
+  });
+  renderTimeSeries();
+}
+
+renderTimeSeries();
+
+function renderTimeSeries() {
+  const data = ALL.filter(d => d.workMin > 0);
+  const H = 340;
+
+  const dates = data.map(d => new Date(d.date).getTime());
+  const minDate = Math.min(...dates);
+  const maxDate = Math.max(...dates);
+  const dateRange = maxDate - minDate;
+  const datePad = dateRange * 0.04;
+
+  const maxIY = Math.max(...data.map(d => d.iy));
+
+  // Scale config
+  const isLog = timeScale === 'log';
+  const minIYLog = -3;
+  const maxIYLog = 1.1;
+  const linearMax = maxIY * 1.15;
+
+  function xPos(dateStr) {
+    const t = new Date(dateStr).getTime();
+    return ((t - minDate + datePad) / (dateRange + datePad * 2)) * 100;
+  }
+
+  function yPos(iy) {
+    if (isLog) {
+      const logV = Math.log10(Math.max(iy, 0.001));
+      return ((logV - minIYLog) / (maxIYLog - minIYLog)) * 100;
+    }
+    return (iy / linearMax) * 100;
+  }
+
+  // Gridlines + Y axis
+  const timeGrid = document.getElementById('timeGrid');
+  const timeYAxis = document.getElementById('timeYAxis');
+  timeGrid.innerHTML = ''; timeYAxis.innerHTML = '';
+
+  const ticks = isLog
+    ? [0.001, 0.01, 0.1, 1.0, 10]
+    : (function() {
+        const step = niceStep(linearMax, 6);
+        const t = [];
+        for (let v = 0; v <= linearMax + step * 0.01; v += step) t.push(v);
+        return t;
+      })();
+
+  ticks.forEach(v => {
+    const pct = yPos(v);
+    if (pct < -2 || pct > 102) return;
+
+    const gl = document.createElement('div');
+    gl.className = 'gridline' + (Math.abs(v - 1.0) < 0.001 ? ' ref' : '');
+    gl.style.bottom = pct + '%';
+    timeGrid.appendChild(gl);
+
+    if (Math.abs(v - 1.0) < 0.001) {
+      const lab = document.createElement('div');
+      lab.className = 'ref-label';
+      lab.style.bottom = pct + '%';
+      lab.textContent = 'IY = 1.0  (1 min human work per min compute)';
+      timeGrid.appendChild(lab);
+    }
+
+    const tk = document.createElement('div');
+    tk.className = 'y-tick';
+    tk.style.bottom = pct + '%';
+    if (isLog) {
+      tk.textContent = v < 0.01 ? v.toFixed(3) : v < 0.1 ? v.toFixed(2) : v < 1 ? v.toFixed(1) : v.toFixed(0);
+    } else {
+      tk.textContent = v < 0.1 ? v.toFixed(2) : v.toFixed(1);
+    }
+    timeYAxis.appendChild(tk);
+  });
+
+  // IY=1 ref line for linear if not already a tick
+  if (!isLog && 1.0 <= linearMax) {
+    const pct = yPos(1.0);
+    const gl = document.createElement('div');
+    gl.className = 'gridline ref';
+    gl.style.bottom = pct + '%';
+    timeGrid.appendChild(gl);
+    const lab = document.createElement('div');
+    lab.className = 'ref-label';
+    lab.style.bottom = pct + '%';
+    lab.textContent = 'IY = 1.0  (1 min human work per min compute)';
+    timeGrid.appendChild(lab);
+  }
+
+  // X axis labels
+  const xAxis = document.getElementById('timeXAxis');
+  xAxis.innerHTML = '';
+  const years = [2023, 2024, 2025, 2026];
+  years.forEach(y => {
+    const t = new Date(y + '-01-01').getTime();
+    const pct = ((t - minDate + datePad) / (dateRange + datePad * 2)) * 100;
+    if (pct >= -5 && pct <= 105) {
+      const el = document.createElement('div');
+      el.style.cssText = `position:absolute;left:${pct}%;font-family:'IBM Plex Mono',monospace;font-size:0.7rem;color:var(--text-muted);transform:translateX(-50%);`;
+      el.textContent = y;
+      xAxis.style.position = 'relative';
+      xAxis.style.height = '20px';
+      xAxis.appendChild(el);
+    }
+  });
+
+  // Canvas for connecting lines
+  const canvas = document.getElementById('timeCanvas');
+  const rect = canvas.parentElement.getBoundingClientRect();
+  canvas.width = rect.width * 2;
+  canvas.height = H * 2;
+  canvas.style.width = rect.width + 'px';
+  canvas.style.height = H + 'px';
+  const ctx = canvas.getContext('2d');
+  ctx.scale(2, 2);
+  const W = rect.width;
+
+  // Draw connecting lines per provider
+  const providers = ['Anthropic', 'OpenAI', 'Google'];
+  const colorMap = { Anthropic: '#4aeaac', OpenAI: '#8b949e', Google: '#60a5fa' };
+
+  providers.forEach(prov => {
+    const pts = data.filter(d => d.provider === prov)
+      .sort((a, b) => new Date(a.date) - new Date(b.date))
+      .map(d => ({
+        x: (xPos(d.date) / 100) * W,
+        y: H - (yPos(d.iy) / 100) * H,
+      }));
+
+    if (pts.length < 2) return;
+    ctx.beginPath();
+    ctx.strokeStyle = colorMap[prov];
+    ctx.globalAlpha = 0.3;
+    ctx.lineWidth = 1.5;
+    ctx.moveTo(pts[0].x, pts[0].y);
+    for (let i = 1; i < pts.length; i++) {
+      ctx.lineTo(pts[i].x, pts[i].y);
+    }
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+  });
+
+  // Dots
+  const pointsEl = document.getElementById('timePoints');
+  pointsEl.innerHTML = '';
+  pointsEl.style.pointerEvents = 'auto';
+
+  data.forEach(d => {
+    const x = xPos(d.date);
+    const y = yPos(d.iy);
+
+    const dot = document.createElement('div');
+    dot.style.cssText = `
+      position: absolute;
+      left: ${x}%;
+      bottom: ${y}%;
+      width: 10px; height: 10px;
+      border-radius: 50%;
+      background: ${provColor(d.provider).replace('var(--anthropic)', '#4aeaac').replace('var(--openai)', '#8b949e').replace('var(--google)', '#60a5fa')};
+      transform: translate(-50%, 50%);
+      cursor: pointer;
+      transition: transform 0.15s, box-shadow 0.15s;
+      z-index: 4;
+    `;
+
+    const color = colorMap[d.provider];
+    dot.addEventListener('mouseenter', e => {
+      dot.style.transform = 'translate(-50%, 50%) scale(1.5)';
+      dot.style.boxShadow = `0 0 10px ${color}80`;
+      showTip(e, d);
+    });
+    dot.addEventListener('mousemove', moveTip);
+    dot.addEventListener('mouseleave', e => {
+      dot.style.transform = 'translate(-50%, 50%) scale(1)';
+      dot.style.boxShadow = 'none';
+      hideTip();
+    });
+
+    pointsEl.appendChild(dot);
+  });
+}
+</script>
+</body>
+</html>
